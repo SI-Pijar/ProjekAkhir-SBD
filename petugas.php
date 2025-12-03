@@ -12,9 +12,23 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] != 'ADMIN') {
 }
 
 $username = $_SESSION['username'];
-$role = $_SESSION['role'];
+$role     = $_SESSION['role'];
 
-// ============ SIMPAN DATA ============
+// MODE EDIT
+$edit_mode = false;
+$edit_data = null;
+
+if (isset($_GET['edit'])) {
+    $edit_id = (int) $_GET['edit'];
+
+    $q_edit  = mysqli_query($conn, "SELECT * FROM petugas WHERE id_petugas = $edit_id LIMIT 1");
+    if ($q_edit && mysqli_num_rows($q_edit) == 1) {
+        $edit_data = mysqli_fetch_assoc($q_edit);
+        $edit_mode = true;
+    }
+}
+
+// CREATE
 if (isset($_POST['simpan'])) {
     $nama_petugas = $_POST['nama_petugas'];
     $no_hp        = $_POST['no_hp'];
@@ -28,9 +42,27 @@ if (isset($_POST['simpan'])) {
     exit;
 }
 
-// ============ HAPUS DATA ============
+// UPDATE
+if (isset($_POST['update'])) {
+    $id_petugas   = (int) $_POST['id_petugas'];
+    $nama_petugas = $_POST['nama_petugas'];
+    $no_hp        = $_POST['no_hp'];
+    $shift        = $_POST['shift'];
+
+    $sql_update = "UPDATE petugas
+                   SET nama_petugas = '$nama_petugas',
+                       no_hp        = '$no_hp',
+                       shift        = '$shift'
+                   WHERE id_petugas = $id_petugas";
+    mysqli_query($conn, $sql_update);
+
+    header("Location: petugas.php");
+    exit;
+}
+
+//DELETE 
 if (isset($_GET['hapus'])) {
-    $id = $_GET['hapus'];
+    $id = (int) $_GET['hapus'];
 
     $sql_delete = "DELETE FROM petugas WHERE id_petugas = $id";
     mysqli_query($conn, $sql_delete);
@@ -39,7 +71,7 @@ if (isset($_GET['hapus'])) {
     exit;
 }
 
-// ============ QUERY PETUGAS (INI WAJIB ADA) ============
+//READ
 $sql_petugas     = "SELECT * FROM petugas ORDER BY id_petugas DESC";
 $result_petugas  = mysqli_query($conn, $sql_petugas);
 ?>
@@ -69,32 +101,56 @@ $result_petugas  = mysqli_query($conn, $sql_petugas);
 
         <div class="grid-2">
             <div class="card accent">
-                <h2>Tambah Petugas</h2>
+                <h2><?php echo $edit_mode ? 'Ubah Data Petugas' : 'Tambah Petugas'; ?></h2>
+
                 <form method="POST" style="margin-top:10px;">
+                    <?php if ($edit_mode) { ?>
+                        <input type="hidden" name="id_petugas" value="<?php echo $edit_data['id_petugas']; ?>">
+                    <?php } ?>
+
                     <p>
                         <label>Nama Petugas</label>
-                        <input type="text" name="nama_petugas" required>
+                        <input type="text"
+                               name="nama_petugas"
+                               required
+                               value="<?php echo htmlspecialchars($edit_data['nama_petugas'] ?? ''); ?>">
                     </p>
                     <p>
                         <label>No HP</label>
-                        <input type="text" name="no_hp">
+                        <input type="text"
+                               name="no_hp"
+                               value="<?php echo htmlspecialchars($edit_data['no_hp'] ?? ''); ?>">
                     </p>
                     <p>
                         <label>Shift</label>
                         <select name="shift" required>
-                            <option value="PAGI">PAGI</option>
-                            <option value="SIANG">SIANG</option>
-                            <option value="MALAM">MALAM</option>
+                            <?php
+                            $shift_now = $edit_data['shift'] ?? 'PAGI';
+                            $options   = ['PAGI', 'SIANG', 'MALAM'];
+                            foreach ($options as $opt) {
+                                $sel = ($shift_now == $opt) ? 'selected' : '';
+                                echo "<option value='$opt' $sel>$opt</option>";
+                            }
+                            ?>
                         </select>
                     </p>
-                    <button type="submit" name="simpan">Simpan</button>
+
+                    <?php if ($edit_mode) { ?>
+                        <button type="submit" name="update">Update Petugas</button>
+                        <a href="petugas.php" class="btn btn-secondary">Batal</a>
+                    <?php } else { ?>
+                        <button type="submit" name="simpan">Simpan</button>
+                    <?php } ?>
                 </form>
             </div>
 
             <div class="card">
                 <h2>Catatan</h2>
                 <p class="text-muted" style="margin-top:6px;">
-                    Data petugas digunakan dalam laporan harian untuk menelusuri siapa yang bertugas pada TPS tertentu dan shift yang berjalan.
+                    Data petugas digunakan dalam laporan harian untuk menelusuri
+                    siapa yang bertugas di TPS tertentu dan shift yang berjalan.
+                    Fitur <strong>Update</strong> memudahkan jika terjadi perubahan
+                    nomor HP atau penjadwalan shift.
                 </p>
             </div>
         </div>
@@ -120,6 +176,9 @@ $result_petugas  = mysqli_query($conn, $sql_petugas);
                             echo "<td>".$row['no_hp']."</td>";
                             echo "<td>".$row['shift']."</td>";
                             echo "<td>
+                                    <a href='petugas.php?edit=".$row['id_petugas']."' class='btn btn-secondary'>
+                                        Edit
+                                    </a>
                                     <a href='petugas.php?hapus=".$row['id_petugas']."'
                                        class='btn btn-danger'
                                        onclick=\"return confirm('Hapus petugas ini?')\">
