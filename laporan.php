@@ -5,19 +5,16 @@ ini_set('display_errors', 1);
 session_start();
 include 'config.php';
 
-// ADMIN dan PETUGAS harus login dulu
+// hanya ADMIN dan PETUGAS yang boleh akses
 if (!isset($_SESSION['role'])) {
     header("Location: login.php");
     exit;
 }
 
-// amankan data session
 $username = $_SESSION['username'] ?? '';
 $role     = $_SESSION['role'] ?? '';
 
-// =========================
 // 1. PROSES SIMPAN LAPORAN
-// =========================
 if (isset($_POST['simpan'])) {
     $id_tps     = $_POST['id_tps'];
     $id_petugas = $_POST['id_petugas'];
@@ -34,26 +31,68 @@ if (isset($_POST['simpan'])) {
 
     mysqli_query($conn, $sql_insert);
 
-    // setelah simpan, reload halaman
     header("Location: laporan.php");
     exit;
 }
 
-// =========================
-// 2. AMBIL DATA MASTER UNTUK DROPDOWN INPUT
-// =========================
+// 2. DATA MASTER UNTUK FORM INPUT
 $tps_res     = mysqli_query($conn, "SELECT * FROM tps WHERE status = 'AKTIF' ORDER BY nama_tps");
 $petugas_res = mysqli_query($conn, "SELECT * FROM petugas ORDER BY nama_petugas");
 $jenis_res   = mysqli_query($conn, "SELECT * FROM jenis_sampah ORDER BY nama_jenis");
 
-// =========================
-// 3. FILTER DATA LAPORAN
-// =========================
-$filter_tps = isset($_GET['id_tps']) ? $_GET['id_tps'] : '';
-$filter_tgl = isset($_GET['tanggal']) ? $_GET['tanggal'] : '';
+// 3. FILTER + PAGINATION
+$filter_tps = isset($_GET['id_tps'])   ? $_GET['id_tps']   : '';
+$filter_tgl = isset($_GET['tanggal'])  ? $_GET['tanggal']  : '';
+$per_page   = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 10;
+$page       = isset($_GET['page'])     ? (int)$_GET['page']     : 1;
 
+$allowed_per_page = [10, 50, 100];
+if (!in_array($per_page, $allowed_per_page)) {
+    $per_page = 10;
+}
+if ($page < 1) {
+    $page = 1;
+}
+
+//query dasar
+$sql_base = "
+    FROM laporan_harian lh
+    JOIN tps         ON lh.id_tps = tps.id_tps
+    JOIN petugas     ON lh.id_petugas = petugas.id_petugas
+    JOIN jenis_sampah ON lh.id_jenis = jenis_sampah.id_jenis
+    WHERE 1=1
+";
+
+if ($filter_tps != '') {
+    $sql_base .= " AND lh.id_tps = " . intval($filter_tps);
+}
+
+if ($filter_tgl != '') {
+    $tgl_safe = mysqli_real_escape_string($conn, $filter_tgl);
+    $sql_base .= " AND lh.tanggal = '$tgl_safe'";
+}
+
+//Hitung total baris untuk pagination
+$sql_count   = "SELECT COUNT(*) AS total " . $sql_base;
+$count_res   = mysqli_query($conn, $sql_count);
+$total_rows  = 0;
+$total_pages = 1;
+
+if ($count_res) {
+    $row_count  = mysqli_fetch_assoc($count_res);
+    $total_rows = (int)$row_count['total'];
+    $total_pages = max(1, ceil($total_rows / $per_page));
+}
+
+if ($page > $total_pages) {
+    $page = $total_pages;
+}
+
+$offset = ($page - 1) * $per_page;
+
+//Query ambil data dengan LIMIT
 $sql_laporan = "
-    SELECT 
+    SELECT
         lh.id_laporan,
         lh.tanggal,
         lh.jam,
@@ -62,25 +101,13 @@ $sql_laporan = "
         jenis_sampah.nama_jenis,
         lh.volume_kg,
         lh.keterangan
-    FROM laporan_harian lh
-    JOIN tps ON lh.id_tps = tps.id_tps
-    JOIN petugas ON lh.id_petugas = petugas.id_petugas
-    JOIN jenis_sampah ON lh.id_jenis = jenis_sampah.id_jenis
-    WHERE 1=1
+    " . $sql_base . "
+    ORDER BY lh.tanggal DESC, lh.jam DESC
+    LIMIT $per_page OFFSET $offset
 ";
 
-if ($filter_tps != '') {
-    $sql_laporan .= " AND lh.id_tps = " . intval($filter_tps);
-}
-
-if ($filter_tgl != '') {
-    $tgl_safe = mysqli_real_escape_string($conn, $filter_tgl);
-    $sql_laporan .= " AND lh.tanggal = '$tgl_safe'";
-}
-
-$sql_laporan .= " ORDER BY lh.tanggal DESC, lh.jam DESC";
-
 $laporan_res    = mysqli_query($conn, $sql_laporan);
+
 // query terpisah untuk dropdown filter TPS
 $tps_filter_res = mysqli_query($conn, "SELECT * FROM tps ORDER BY nama_tps");
 ?>
@@ -196,13 +223,21 @@ $tps_filter_res = mysqli_query($conn, "SELECT * FROM tps ORDER BY nama_tps");
                     </p>
                     <p>
                         <label>Tanggal</label>
-                        <input type="date" name="tanggal" value="<?php echo $filter_tgl; ?>">
+                        <input type="date" name="tanggal" value="<?php echo htmlspecialchars($filter_tgl); ?>">
+                    </p>
+                    <p>
+                        <label>Jumlah data per halaman</label>
+                        <select name="per_page">
+                            <option value="10"  <?php echo ($per_page == 10  ? 'selected' : ''); ?>>10</option>
+                            <option value="50"  <?php echo ($per_page == 50  ? 'selected' : ''); ?>>50</option>
+                            <option value="100" <?php echo ($per_page == 100 ? 'selected' : ''); ?>>100</option>
+                        </select>
                     </p>
                     <button type="submit">Terapkan Filter</button>
                     <a href="laporan.php" class="btn btn-secondary">Reset</a>
                 </form>
                 <p class="text-muted" style="margin-top:8px;">
-                    Gunakan filter untuk fokus pada TPS tertentu atau satu tanggal tertentu.
+                    Gunakan filter untuk fokus pada TPS tertentu, tanggal tertentu, dan atur berapa banyak data yang ditampilkan per halaman.
                 </p>
             </div>
         </div>
@@ -210,6 +245,9 @@ $tps_filter_res = mysqli_query($conn, "SELECT * FROM tps ORDER BY nama_tps");
         <!-- TABEL LAPORAN -->
         <div class="card" style="margin-top:14px;">
             <h2>Daftar Laporan</h2>
+            <p class="text-muted" style="margin-top:4px;">
+                Total data: <?php echo $total_rows; ?> entri.
+            </p>
             <div class="table-wrapper" style="margin-top:8px;">
                 <table>
                     <tr>
@@ -240,6 +278,51 @@ $tps_filter_res = mysqli_query($conn, "SELECT * FROM tps ORDER BY nama_tps");
                     ?>
                 </table>
             </div>
+
+            <?php
+            // 4. PAGINATION (MAKS 5 NOMOR)
+            if ($total_pages > 1) {
+
+                $qs = [];
+                if ($filter_tps != '') {
+                    $qs[] = "id_tps=" . urlencode($filter_tps);
+                }
+                if ($filter_tgl != '') {
+                    $qs[] = "tanggal=" . urlencode($filter_tgl);
+                }
+                $qs[] = "per_page=" . $per_page;
+                $base_qs = implode('&', $qs);
+
+                $start = max(1, $page - 2);
+                $end   = min($total_pages, $page + 2);
+
+                if ($end - $start < 4) {
+                    if ($start == 1) {
+                        $end = min(5, $total_pages);
+                    } elseif ($end == $total_pages) {
+                        $start = max(1, $total_pages - 4);
+                    }
+                }
+                ?>
+                <div class="pagination">
+                    <span>Halaman:</span>
+
+                    <?php if ($page > 1) { ?>
+                        <a class="page-link" href="laporan.php?<?php echo $base_qs; ?>&page=<?php echo $page - 1; ?>">&laquo;</a>
+                    <?php } ?>
+
+                    <?php for ($i = $start; $i <= $end; $i++) { ?>
+                        <a class="page-link <?php echo ($i == $page ? 'active' : ''); ?>"
+                           href="laporan.php?<?php echo $base_qs; ?>&page=<?php echo $i; ?>">
+                            <?php echo $i; ?>
+                        </a>
+                    <?php } ?>
+
+                    <?php if ($page < $total_pages) { ?>
+                        <a class="page-link" href="laporan.php?<?php echo $base_qs; ?>&page=<?php echo $page + 1; ?>">&raquo;</a>
+                    <?php } ?>
+                </div>
+            <?php } ?>
         </div>
     </div>
 </body>
